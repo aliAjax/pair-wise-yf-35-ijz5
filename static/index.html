@@ -3,32 +3,331 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>反兴奋剂检测与结果管理</title>
+  <title>双瓶样本封存与复检</title>
   <style>
-    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; margin: 2rem; color: #1f2937; }
-    main { max-width: 820px; margin: auto; }
-    pre { background: #f3f4f6; padding: 1rem; border-radius: 8px; overflow-x: auto; }
-    button { padding: .5rem .8rem; cursor: pointer; }
+    :root {
+      --sealed: #047857;
+      --opened: #b45309;
+      --adverse: #b91c1c;
+      --normal: #047857;
+      --muted: #6b7280;
+      --line: #e5e7eb;
+    }
+    * { box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif; margin: 0; color: #1f2937; background: #f9fafb; }
+    main { max-width: 1000px; margin: auto; padding: 1.5rem; }
+    h1 { font-size: 1.4rem; margin: 0 0 .25rem; }
+    h2 { font-size: 1.05rem; margin: 1.5rem 0 .5rem; }
+    .muted { color: var(--muted); font-size: .85rem; }
+    .bar { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; background: #fff; border: 1px solid var(--line); border-radius: 10px; padding: .75rem 1rem; margin: 1rem 0; }
+    select, input, button { font: inherit; padding: .4rem .6rem; border: 1px solid #d1d5db; border-radius: 6px; background: #fff; }
+    button { cursor: pointer; background: #111827; color: #fff; border-color: #111827; }
+    button.secondary { background: #fff; color: #111827; }
+    button:disabled { opacity: .45; cursor: not-allowed; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: .75rem; }
+    .card { background: #fff; border: 1px solid var(--line); border-radius: 10px; padding: 1rem; }
+    .card.selected { outline: 2px solid #2563eb; }
+    .pill { display: inline-block; font-size: .75rem; padding: .1rem .55rem; border-radius: 999px; color: #fff; }
+    .pill.sealed { background: var(--sealed); }
+    .pill.opened { background: var(--opened); }
+    .pill.adverse { background: var(--adverse); }
+    .pill.normal { background: var(--normal); }
+    .pill.idle { background: #6b7280; }
+    table { width: 100%; border-collapse: collapse; background: #fff; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+    th, td { text-align: left; padding: .55rem .75rem; border-bottom: 1px solid var(--line); font-size: .85rem; vertical-align: top; }
+    th { background: #f3f4f6; font-weight: 600; }
+    tr:last-child td { border-bottom: none; }
+    .row { display: flex; flex-wrap: wrap; gap: .5rem; align-items: end; }
+    .field { display: flex; flex-direction: column; gap: .25rem; }
+    .field label { font-size: .75rem; color: var(--muted); }
+    #msg { margin: .5rem 0; font-size: .85rem; white-space: pre-wrap; }
+    #msg.ok { color: var(--sealed); }
+    #msg.err { color: var(--adverse); }
+    code { background: #f3f4f6; padding: 0 .25rem; border-radius: 4px; }
   </style>
 </head>
 <body>
 <main>
-  <h1>反兴奋剂检测与结果管理</h1>
-  <p>这是最小演示页面。使用浏览器或 curl 调用 JSON API。</p>
-  <p><button onclick="checkHealth()">检查服务状态</button></p>
-  <pre id="result">等待操作</pre>
-  <h2>常用接口</h2>
-  <pre>GET  /health
-GET  /api/&lt;kind&gt;
-POST /api/&lt;kind&gt;
-GET  /api/entities/&lt;id&gt;
-POST /api/entities/&lt;id&gt;/actions</pre>
+  <h1>双瓶样本封存与 B 瓶复检</h1>
+  <p class="muted">封存时分别登记 A 瓶 / B 瓶封条号；实验室日常检测只处理 A 瓶。A 瓶异常时由管理员发起 B 瓶复检，B 瓶须登记两名见证人后方可启封，手续不全则保持封存。</p>
+
+  <div class="bar">
+    <div class="field">
+      <label>身份</label>
+      <select id="user">
+        <option value="admin-1|admin">管理员 admin-1</option>
+        <option value="dco-1|inspector">取样官 dco-1</option>
+        <option value="lab-1|lab">实验室 lab-1</option>
+        <option value="viewer-1|viewer">访客 viewer-1</option>
+      </select>
+    </div>
+    <button class="secondary" onclick="loadSamples()">刷新</button>
+    <button class="secondary" onclick="seedDemo()">生成演示数据</button>
+    <span class="muted">当前样本：<code id="currentId">未选择</code></span>
+  </div>
+
+  <div id="msg"></div>
+
+  <h2>样本列表</h2>
+  <div id="sampleList" class="grid"><p class="muted">加载中…</p></div>
+
+  <div id="detail" style="display:none">
+    <h2>双瓶状态 · <span id="sampleCode"></span></h2>
+    <div class="grid">
+      <div class="card">
+        <strong>A 瓶（日常检测瓶）</strong>
+        <p>封条号：<code id="aSeal"></code></p>
+        <p>状态：<span id="aState"></span></p>
+        <p>结果：<span id="aResult"></span></p>
+      </div>
+      <div class="card">
+        <strong>B 瓶（复检备份瓶）</strong>
+        <p>封条号：<code id="bSeal"></code></p>
+        <p>状态：<span id="bState"></span></p>
+        <p>复检结果：<span id="bResult"></span></p>
+      </div>
+    </div>
+    <p class="muted">样本总状态：<code id="sampleStatus"></code>；复检发起人：<span id="retestBy"></span></p>
+
+    <h2>操作</h2>
+    <div class="row" id="actions"></div>
+
+    <h2>启封记录</h2>
+    <table>
+      <thead>
+        <tr><th>瓶号</th><th>封条号</th><th>启封时间（UTC）</th><th>经办人</th><th>见证人</th></tr>
+      </thead>
+      <tbody id="records"></tbody>
+    </table>
+  </div>
 </main>
+
 <script>
-async function checkHealth() {
-  const response = await fetch('/health');
-  document.getElementById('result').textContent = JSON.stringify(await response.json(), null, 2);
+let samples = [];
+let current = null;
+
+const STATUS_LABELS = {
+  scheduled: '已计划', collected: '已采集', sealed: '已封存',
+  in_transit: '运输中', received: '已签收',
+  analyzed_a: 'A瓶已检测', adverse: 'A瓶阳性确认', cleared: 'A瓶正常/已结案',
+  b_retest_requested: 'B瓶复检已发起', b_opened: 'B瓶已启封', b_analyzed: 'B瓶复检完成',
+};
+
+function actor() {
+  const [userId, role] = document.getElementById('user').value.split('|');
+  return { userId, role };
 }
+
+function setMsg(text, ok) {
+  const el = document.getElementById('msg');
+  el.textContent = text || '';
+  el.className = ok ? 'ok' : (text ? 'err' : '');
+}
+
+async function api(method, path, body) {
+  const { userId, role } = actor();
+  const options = { method, headers: { 'X-User-Id': userId, 'X-Role': role } };
+  if (body) {
+    options.headers['Content-Type'] = 'application/json';
+    options.body = JSON.stringify(body);
+  }
+  const res = await fetch(path, options);
+  const value = await res.json();
+  if (!res.ok) {
+    throw new Error(value.error || ('HTTP ' + res.status));
+  }
+  return value;
+}
+
+function pill(state, label) {
+  const cls = ['sealed', 'opened', 'adverse', 'normal'].includes(state) ? state : 'idle';
+  return `<span class="pill ${cls}">${label}</span>`;
+}
+
+async function loadSamples() {
+  setMsg('');
+  try {
+    const data = await api('GET', '/api/samples');
+    samples = data.items;
+    const list = document.getElementById('sampleList');
+    if (!samples.length) {
+      list.innerHTML = '<p class="muted">暂无样本，点击“生成演示数据”。</p>';
+    } else {
+      list.innerHTML = samples.map(s => `
+        <div class="card ${current && current.id === s.id ? 'selected' : ''}" style="cursor:pointer" onclick="selectSample('${s.id}')">
+          <strong>${escapeHtml(s.data.sample_code || s.id)}</strong>
+          <p class="muted">${STATUS_LABELS[s.status] || s.status}</p>
+          <p>${escapeHtml(s.data.event || '')}</p>
+        </div>`).join('');
+    }
+    if (current) {
+      current = samples.find(s => s.id === current.id) || null;
+      if (current) renderDetail(); else document.getElementById('detail').style.display = 'none';
+    }
+  } catch (err) {
+    setMsg(err.message);
+  }
+}
+
+function selectSample(id) {
+  current = samples.find(s => s.id === id) || null;
+  loadSamples();
+}
+
+function escapeHtml(value) {
+  return String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+function resultPill(result) {
+  if (result === 'adverse') return pill('adverse', '异常 adverse');
+  if (result === 'normal') return pill('normal', '正常 normal');
+  return '<span class="muted">—</span>';
+}
+
+function renderDetail() {
+  document.getElementById('detail').style.display = '';
+  document.getElementById('currentId').textContent = current.id;
+  document.getElementById('sampleCode').textContent = current.data.sample_code || current.id;
+  document.getElementById('sampleStatus').textContent = STATUS_LABELS[current.status] || current.status;
+  document.getElementById('retestBy').textContent = current.data.retest_requested_by
+    ? `${current.data.retest_requested_by}（${current.data.retest_requested_at}）` : '未发起';
+
+  const bottles = current.data.bottles || {};
+  const a = bottles.A || {};
+  const b = bottles.B || {};
+  document.getElementById('aSeal').textContent = a.seal_id || '—';
+  document.getElementById('aState').innerHTML = a.state
+    ? pill(a.state === 'sealed' ? 'sealed' : 'opened', a.state === 'sealed' ? '封存中' : '已启封')
+    : '<span class="muted">未封存</span>';
+  document.getElementById('aResult').innerHTML = resultPill(current.data.a_result);
+
+  document.getElementById('bSeal').textContent = b.seal_id || '—';
+  document.getElementById('bState').innerHTML = b.state
+    ? pill(b.state === 'sealed' ? 'sealed' : 'opened', b.state === 'sealed' ? '封存中' : '已启封')
+    : '<span class="muted">未封存</span>';
+  document.getElementById('bResult').innerHTML = resultPill(current.data.b_result);
+
+  renderActions();
+  renderRecords();
+}
+
+function fieldHtml(id, label, placeholder) {
+  return `<div class="field"><label>${label}</label><input id="${id}" placeholder="${placeholder || ''}"></div>`;
+}
+
+function renderActions() {
+  const s = current.status;
+  const acts = [];
+  if (s === 'collected') {
+    acts.push({ action: 'seal', title: '封存（登记 A/B 封条号）', fields: [
+      ['seal_id_a', 'A瓶封条号', 'SEAL-A-..'], ['seal_id_b', 'B瓶封条号', 'SEAL-B-..'] ] });
+  }
+  if (s === 'sealed') acts.push({ action: 'ship', title: '发运', fields: [['carrier', '承运方', 'Courier-A']] });
+  if (s === 'in_transit') acts.push({ action: 'receive', title: '实验室签收', fields: [['lab_id', '实验室编号', 'LAB-1']] });
+  if (s === 'received') {
+    acts.push({ action: 'analyze', title: 'A瓶启封并检测', fields: [
+      ['result', 'A瓶结果 (adverse/normal)', 'adverse 或 normal'],
+      ['aW1', '见证人1（可选）', ''], ['aW2', '见证人2（可选）', ''] ] });
+  }
+  if (s === 'analyzed_a' && current.data.a_result === 'adverse') {
+    acts.push({ action: 'report_adverse', title: '确认A瓶阳性', fields: [] });
+  }
+  if (s === 'analyzed_a') {
+    acts.push({ action: 'clear', title: 'A瓶正常/清除', fields: [['reason', '原因', 'normal result']] });
+  }
+  if ((s === 'analyzed_a' || s === 'adverse') && current.data.a_result === 'adverse'
+      && (current.data.bottles || {}).B && current.data.bottles.B.state === 'sealed') {
+    acts.push({ action: 'request_b_retest', title: '管理员发起B瓶复检', fields: [], adminOnly: true });
+  }
+  if (s === 'b_retest_requested') {
+    acts.push({ action: 'open_b', title: '登记两名见证人并启封B瓶', fields: [
+      ['w1', '见证人1（必填）', 'witness-1'], ['w2', '见证人2（必填）', 'witness-2'] ] });
+  }
+  if (s === 'b_opened') {
+    acts.push({ action: 'analyze_b', title: 'B瓶复检', fields: [['b_result', 'B瓶结果 (adverse/normal)', 'adverse 或 normal']] });
+  }
+
+  document.getElementById('actions').innerHTML = acts.map((a, i) => {
+    const inputs = a.fields.map(([id, label, ph]) =>
+      `<div class="field"><label>${label}</label><input id="act_${i}_${id}" placeholder="${ph}"></div>`).join('');
+    const disabled = a.adminOnly && actor().role !== 'admin' ? 'disabled title="仅管理员可发起"' : '';
+    return `${inputs}<button ${disabled} onclick="doAction(${i})">${a.title}</button>`;
+  }).join('') || '<p class="muted">当前状态没有可执行的操作。</p>';
+  window._acts = acts;
+}
+
+async function doAction(index) {
+  const spec = window._acts[index];
+  const data = {};
+  for (const [id] of spec.fields) {
+    const value = document.getElementById(`act_${index}_${id}`).value.trim();
+    if (spec.action === 'analyze') {
+      if (id === 'result') data.result = value;
+      else if (value) (data.witnesses = data.witnesses || []).push(value);
+    } else if (spec.action === 'open_b') {
+      (data.witnesses = data.witnesses || []).push(value);
+    } else if (value) {
+      data[id] = value;
+    }
+  }
+  try {
+    const updated = await api('POST', `/api/entities/${current.id}/actions`, {
+      action: spec.action, data, expected_version: current.version,
+    });
+    setMsg(`✓ ${spec.action} 成功：${updated.status}`, true);
+    await loadSamples();
+    current = samples.find(x => x.id === current.id) || current;
+    renderDetail();
+  } catch (err) {
+    setMsg('✗ ' + err.message);
+  }
+}
+
+async function renderRecords() {
+  const tbody = document.getElementById('records');
+  try {
+    const data = await api('GET', `/api/audit?entity_id=${encodeURIComponent(current.id)}`);
+    const records = (current.data.unseal_records || []);
+    if (!records.length) {
+      tbody.innerHTML = '<tr><td colspan="5" class="muted">尚无启封记录。</td></tr>';
+      return;
+    }
+    // 启封记录保留瓶号、时间、经办人、见证人
+    tbody.innerHTML = records.map(r => `
+      <tr>
+        <td>${r.bottle} 瓶</td>
+        <td><code>${escapeHtml(r.seal_id || '')}</code></td>
+        <td>${escapeHtml(r.opened_at)}</td>
+        <td>${escapeHtml(r.operator_id)}</td>
+        <td>${r.witnesses && r.witnesses.length ? escapeHtml(r.witnesses.join('、')) : '<span class="muted">无</span>'}</td>
+      </tr>`).join('');
+  } catch (err) {
+    tbody.innerHTML = `<tr><td colspan="5" class="muted">${escapeHtml(err.message)}</td></tr>`;
+  }
+}
+
+async function seedDemo() {
+  setMsg('');
+  try {
+    const a = await api('POST', '/api/athletes', { name: '演示运动员', discipline: 'cycling' });
+    const s = await api('POST', '/api/samples', {
+      athlete_id: a.id, sample_code: 'DEMO-' + Math.floor(Math.random() * 1000), event: 'demo-event',
+    });
+    await api('POST', `/api/entities/${s.id}/actions`, { action: 'collect', data: { collected_at: new Date().toISOString() } });
+    await api('POST', `/api/entities/${s.id}/actions`, {
+      action: 'seal', data: { seal_id_a: 'SEAL-A-' + s.id.slice(0, 4), seal_id_b: 'SEAL-B-' + s.id.slice(0, 4) },
+    });
+    setMsg('✓ 已生成封存样本（A/B 瓶封条号已登记），可继续发运、签收、检测。', true);
+    await loadSamples();
+  } catch (err) {
+    setMsg('✗ ' + err.message);
+  }
+}
+
+document.getElementById('user').addEventListener('change', () => {
+  if (current) renderActions();
+});
+loadSamples();
 </script>
 </body>
 </html>
