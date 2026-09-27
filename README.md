@@ -26,6 +26,20 @@ python3 app.py --db ./data.db --port 8301
 
 - `athlete`：运动员；`sample`：检测样本；`case`：结果管理案件。
 
+## A/B瓶封存与复检
+
+- `seal` 必须分别登记 `seal_a`、`seal_b` 两个封条号，且两者不能相同。
+- `analyze` 为实验室日常检测，只启封A瓶并记录启封时间、经办人。
+- A瓶异常（`report_adverse`）后，管理员可 `request_b_retest` 发起B瓶复检。
+- `register_witness` 登记见证人（不可重复）；登记满2名后才允许 `open_b` 启封B瓶，
+  手续不全时B瓶保持封存，并在错误信息中明确缺少哪一项。
+- A瓶结果正常（`clear`）时B瓶继续封存。
+- `open_b` 后由实验室 `record_b_result` 记录B瓶复检结果。
+- 所有启封记录保存在样本的 `unseal_records`（瓶号、封条号、时间、经办人、见证人）；
+  样本查询结果附带 `bottle_view` 展示双瓶状态与B瓶缺少的手续。
+- 演示页 `/` 可查看双瓶状态和启封记录，并提供三个一键演示场景
+  （B瓶复检全流程 / A瓶正常 / 手续不全无法启封）。
+
 ## 主要接口
 
 - `GET /health`：健康检查。

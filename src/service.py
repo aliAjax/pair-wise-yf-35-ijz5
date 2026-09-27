@@ -62,12 +62,18 @@ class DomainService:
         entity = self.repository.get_entity(entity_id)
         if not entity:
             raise NotFoundError("entity not found: " + entity_id)
-        return entity
+        return self._enrich(entity)
 
     def list(self, kind=None, status=None):
         if kind:
             kind = self.rules.normalize_kind(kind)
-        return self.repository.list_entities(kind=kind, status=status)
+        return [self._enrich(entity) for entity in self.repository.list_entities(kind=kind, status=status)]
+
+    def _enrich(self, entity):
+        if entity["kind"] == "sample":
+            entity = dict(entity)
+            entity["bottle_view"] = self.rules.bottle_view(entity)
+        return entity
 
     def audit_log(self, entity_id=None):
         return self.repository.list_audit(entity_id=entity_id)
